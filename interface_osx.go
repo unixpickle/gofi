@@ -7,6 +7,20 @@ package gofi
 #import <CoreWLAN/CoreWLAN.h>
 #include <stddef.h>
 
+char * defaultInterface() {
+	NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
+	CWInterface * iface = [[CWWiFiClient sharedWiFiClient] interface];
+	if (!iface) {
+		[pool release];
+		return NULL;
+	}
+	const char * name = [[iface interfaceName] UTF8String];
+	char * res = malloc(strlen(name) + 1);
+	strcpy(res, name);
+	[pool release];
+	return res;
+}
+
 void * createInterface(char * name) {
 	NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
 	NSString * nameStr = [NSString stringWithUTF8String:name];
@@ -64,9 +78,21 @@ type osxInterface struct {
 	ptr unsafe.Pointer
 }
 
-// NewOSXInterface creates an interface given a name.
+// defaultOSXInterfaceName returns the name of the default interface.
+// If no interface exists, the ok value is set to false.
+func defaultOSXInterfaceName() (name string, ok bool) {
+	ptr := C.defaultInterface()
+	if ptr == nil {
+		return "", false
+	}
+	s := C.GoString(ptr)
+	C.free(unsafe.Pointer(ptr))
+	return s, true
+}
+
+// newOSXInterface creates an interface given a name.
 // This fails if the interface cannot be found or is not a WiFi device.
-func NewOSXInterface(name string) (*osxInterface, error) {
+func newOSXInterface(name string) (*osxInterface, error) {
 	ptr := C.createInterface(C.CString(name))
 	if ptr == nil {
 		return nil, errors.New("interface could not be opened: " + name)
