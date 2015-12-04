@@ -52,3 +52,20 @@ func TestBecomePromiscuous(t *testing.T) {
 		t.Error("failed to setup data link:", err)
 	}
 }
+
+func TestSetReadBufferSize(t *testing.T) {
+	name, ok := defaultOSXInterfaceName()
+	if !ok {
+		t.Fatal("no default interface")
+	}
+	handle, err := newBpfHandle()
+	if err != nil {
+		t.Fatal("could not open handle:", err)
+	}
+	if err := handle.SetReadBufferSize(0x100000); err != nil {
+		t.Fatal("failed to set read buffer size:", err)
+	}
+	if err := handle.SetInterface(name); err != nil {
+		t.Fatal("failed to set interface to: " + name + ":", err)
+	}
+}

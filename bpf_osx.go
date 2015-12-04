@@ -22,6 +22,10 @@ const ioctlBIOCSDLT = 0x80044278
 // on a BPF device.
 const ioctlBIOCPROMISC = 0x20004269
 
+// ioctlBIOCSBLEN is an ioctl command used to set the read buffer size
+// on a BPF device.
+const ioctlBIOCSBLEN = 0xc0044266
+
 // dltIEEE802_11_RADIO is a data-link type for ioctlBIOCSDLT.
 // Read more here:
 // http://www.opensource.apple.com/source/tcpdump/tcpdump-16/tcpdump/ieee802_11_radio.h
@@ -34,6 +38,7 @@ const dltIEEE802_11 = 105
 type bpfHandle struct {
 	fd           int
 	dataLinkType int
+	readBuffer   []byte
 }
 
 func newBpfHandle() (*bpfHandle, error) {
@@ -56,6 +61,23 @@ func newBpfHandle() (*bpfHandle, error) {
 		}
 		i++
 	}
+}
+
+// SetReadBufferSize sets the read buffer size on the handle.
+// You must call this before SetInterface() if you wish to read from the device.
+func (b *bpfHandle) SetReadBufferSize(size int) error {
+	numData := make([]byte, 16)
+	numData[0] = byte(size)
+	numData[1] = byte(size >> 8)
+	numData[2] = byte(size >> 16)
+	numData[3] = byte(size >> 24)
+
+	if ok, err := b.ioctlWithData(ioctlBIOCSBLEN, numData); !ok {
+		return err
+	}
+
+	b.readBuffer = make([]byte, size)
+	return nil
 }
 
 // SetInterface assigns an interface name to the BPF handle.
