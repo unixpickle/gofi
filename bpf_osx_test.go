@@ -9,7 +9,7 @@ func TestSetInterface(t *testing.T) {
 	}
 	handle, err := newBpfHandle()
 	if err != nil {
-		t.Fatal("could not open handle")
+		t.Fatal("could not open handle:", err)
 	}
 	if err := handle.SetInterface(name); err != nil {
 		t.Error("failed to set interface to: " + name + ":", err)
@@ -26,12 +26,29 @@ func TestSetupDataLink(t *testing.T) {
 	}
 	handle, err := newBpfHandle()
 	if err != nil {
-		t.Fatal("could not open handle")
+		t.Fatal("could not open handle:", err)
 	}
 	if err := handle.SetInterface(name); err != nil {
 		t.Fatal("failed to set interface to: " + name + ":", err)
 	}
 	if err := handle.SetupDataLink(); err != nil {
-		t.Error("failed to setup data link")
+		t.Error("failed to setup data link:", err)
+	}
+}
+
+func TestBecomePromiscuous(t *testing.T) {
+	name, ok := defaultOSXInterfaceName()
+	if !ok {
+		t.Fatal("no default interface")
+	}
+	handle, err := newBpfHandle()
+	if err != nil {
+		t.Fatal("could not open handle:", err)
+	}
+	if err := handle.SetInterface(name); err != nil {
+		t.Fatal("failed to set interface to: " + name + ":", err)
+	}
+	if err := handle.BecomePromiscuous(); err != nil {
+		t.Error("failed to setup data link:", err)
 	}
 }

@@ -18,6 +18,10 @@ const ioctlBIOCSETIF = 0x8020426c
 // on a BPF device.
 const ioctlBIOCSDLT = 0x80044278
 
+// ioctlBIOCPROMISC is an ioctl command used to enter promiscuous mode
+// on a BPF device.
+const ioctlBIOCPROMISC = 0x20004269
+
 // dltIEEE802_11_RADIO is a data-link type for ioctlBIOCSDLT.
 // Read more here:
 // http://www.opensource.apple.com/source/tcpdump/tcpdump-16/tcpdump/ieee802_11_radio.h
@@ -86,9 +90,28 @@ func (b *bpfHandle) SetupDataLink() error {
 	return errors.New("could not use an 802.11 data-link type")
 }
 
+// BecomePromiscuous enters promiscuous mode.
+// For more, see BIOCPROMISC at https://www.freebsd.org/cgi/man.cgi?bpf(4)
+func (b *bpfHandle) BecomePromiscuous() error {
+	if ok, err := b.ioctlWithInt(ioctlBIOCPROMISC, 0); ok {
+		return nil
+	} else {
+		return err
+	}
+}
+
 func (b *bpfHandle) ioctlWithData(command int, data []byte) (ok bool, err syscall.Errno) {
 	_, _, err = unix.Syscall(unix.SYS_IOCTL, uintptr(b.fd), uintptr(command),
 		uintptr(unsafe.Pointer(&data[0])))
+	if err != 0 {
+		return
+	} else {
+		return true, 0
+	}
+}
+
+func (b *bpfHandle) ioctlWithInt(command, argument int) (ok bool, err syscall.Errno) {
+	_, _, err = unix.Syscall(unix.SYS_IOCTL, uintptr(b.fd), uintptr(command), uintptr(argument))
 	if err != 0 {
 		return
 	} else {
