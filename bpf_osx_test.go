@@ -77,7 +77,7 @@ func TestSetReadBufferSize(t *testing.T) {
 	}
 }
 
-func TestReceive(t *testing.T) {
+func TestReceiveMany(t *testing.T) {
 	name, ok := defaultOSXInterfaceName()
 	if !ok {
 		t.Fatal("no default interface")
@@ -113,7 +113,7 @@ func TestReceive(t *testing.T) {
 		}
 	}()
 
-	_, err = handle.Receive()
+	_, err = handle.ReceiveMany()
 	if (<-notClosed) && err != nil {
 		t.Error("failed to read packets:", err)
 	}

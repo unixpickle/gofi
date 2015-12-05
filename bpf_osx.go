@@ -2,6 +2,7 @@
 package gofi
 
 import (
+	"encoding/binary"
 	"errors"
 	"strconv"
 	"syscall"
@@ -77,17 +78,14 @@ func (b *bpfHandle) Close() error {
 // This will return an error if the OS does not support the given buffer size.
 func (b *bpfHandle) SetReadBufferSize(size int) error {
 	numData := make([]byte, 16)
-	numData[0] = byte(size)
-	numData[1] = byte(size >> 8)
-	numData[2] = byte(size >> 16)
-	numData[3] = byte(size >> 24)
+	binary.LittleEndian.PutUint32(numData, uint32(size))
 
 	if ok, err := b.ioctlWithData(ioctlBIOCSBLEN, numData); !ok {
 		return err
 	}
 
 	b.ioctlWithData(ioctlBIOCGBLEN, numData)
-	if decodeInt32(numData) < size {
+	if binary.LittleEndian.Uint32(numData) < uint32(size) {
 		return errors.New("unsupported buffer size")
 	}
 
@@ -150,8 +148,9 @@ func (b *bpfHandle) BecomePromiscuous() error {
 	}
 }
 
-// Receive reads one or more packets from the handle and returns them.
-func (b *bpfHandle) Receive() ([]Packet, error) {
+// ReceiveMany receives one or more packets, parses them, and returns them.
+// If the read fails or if the packets cannot be parsed, this returns an error.
+func (b *bpfHandle) ReceiveMany() ([]RadioPacket, error) {
 	for {
 		amount, err := unix.Read(b.fd, b.readBuffer)
 		if err == unix.EINTR {
@@ -165,46 +164,53 @@ func (b *bpfHandle) Receive() ([]Packet, error) {
 	}
 }
 
-func (b *bpfHandle) parsePackets(data []byte) ([]Packet, error) {
+func (b *bpfHandle) parsePackets(data []byte) ([]RadioPacket, error) {
 	if len(data) == 0 {
 		return nil, ErrBufferUnderflow
 	}
-	res := make([]Packet, 0, 1)
+
+	res := make([]RadioPacket, 0, 1)
 
 	for i := 0; i < len(data)-18; i = align4(i) {
 		// Parse the bpf_xhdr, as defined in https://www.freebsd.org/cgi/man.cgi?bpf(4).
 		// For some reason, on OS X, this header seems to use 64-bits total for the timestamp.
-		capturedLength := decodeInt32(data[i+8:])
-		originalLength := decodeInt32(data[i+12:])
-		headerLength := decodeInt16(data[i+16:])
+		capturedLength := int(binary.LittleEndian.Uint32(data[i+8:]))
+		originalLength := int(binary.LittleEndian.Uint32(data[i+12:]))
+		headerLength := int(binary.LittleEndian.Uint16(data[i+16:]))
 
-		if i+headerLength+capturedLength > len(data) {
+		// NOTE: if the sizes were greater than 1<<31, casting them to integers
+		// might make them negative. If a size is bigger than int's max value,
+		// then there's no way our buffer can fit it.
+		if capturedLength < 0 || originalLength < 0 ||
+			i+headerLength+capturedLength > len(data) {
 			return nil, ErrBufferUnderflow
 		}
 
 		packetData := data[i+headerLength : i+headerLength+capturedLength]
-		if packet, err := b.parsePacket(packetData, originalLength); err != nil {
+		if p, err := b.parsePacket(packetData); err != nil {
 			return nil, err
 		} else {
-			res = append(res, *packet)
+			res = append(res, *p)
 		}
+
 		i += headerLength + capturedLength
 	}
 
 	return res, nil
 }
 
-func (b *bpfHandle) parsePacket(data []byte, origLen int) (*Packet, error) {
+func (b *bpfHandle) parsePacket(data []byte) (*RadioPacket, error) {
 	if b.dataLinkType == dltIEEE802_11 {
 		if mac, err := ParseMACPacket(data); err != nil {
 			return nil, err
 		} else {
-			return &Packet{MACPacket: *mac}, nil
+			return &RadioPacket{*mac, nil}, nil
 		}
 	} else if b.dataLinkType == dltIEEE802_11_RADIO {
-		return parseRadioPacket(data)
+		return parseRadiotapPacket(data)
+	} else {
+		return nil, errors.New("invalid data-link type")
 	}
-	return nil, errors.New("unsupported data-link type")
 }
 
 func (b *bpfHandle) ioctlWithData(command int, data []byte) (ok bool, err syscall.Errno) {
@@ -226,37 +232,10 @@ func (b *bpfHandle) ioctlWithInt(command, argument int) (ok bool, err syscall.Er
 	}
 }
 
-func parseRadioPacket(data []byte) (*Packet, error) {
-	// TODO: parse the radio header to get power information.
-
-	if len(data) < 4 {
-		return nil, ErrBufferUnderflow
-	}
-
-	headerSize := decodeInt16(data[2:4])
-	if len(data) < headerSize {
-		return nil, ErrBufferUnderflow
-	}
-
-	macPacket, err := ParseMACPacket(data[headerSize:])
-	if err != nil {
-		return nil, err
-	}
-	return &Packet{MACPacket: *macPacket}, nil
-}
-
 func align4(i int) int {
 	if (i & 3) == 0 {
 		return i
 	} else {
 		return i + 4 - (i & 3)
 	}
-}
-
-func decodeInt16(bytes []byte) int {
-	return int(bytes[0]) | (int(bytes[1]) << 8)
-}
-
-func decodeInt32(bytes []byte) int {
-	return int(bytes[0]) | (int(bytes[1]) << 8) | (int(bytes[2]) << 16) | (int(bytes[3]) << 24)
 }
