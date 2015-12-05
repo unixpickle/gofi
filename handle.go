@@ -10,6 +10,8 @@ type Handle interface {
 	SetChannel(int) error
 
 	// Receive reads the next packet from the device.
+	// The returned RadioInfo will be nil if the device does not
+	// support radio information.
 	Receive() (Frame, *RadioInfo, error)
 
 	// Send sends a packet over the device.
