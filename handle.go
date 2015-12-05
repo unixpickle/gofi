@@ -1,3 +1,4 @@
+// package gofi provides a super simple API for sending and receiving data-link packets over WiFi.
 package gofi
 
 type Handle interface {
