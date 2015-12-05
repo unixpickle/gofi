@@ -26,6 +26,10 @@ func NewHandle(interfaceName string) (Handle, error) {
 		return nil, err
 	}
 
+	// NOTE: on El Capitan it seems that you must do this before entering promiscuous
+	// mode to get channel switching to work correctly.
+	inter.Disassociate()
+
 	bpf, err := newBpfHandle()
 	if err != nil {
 		return nil, err
