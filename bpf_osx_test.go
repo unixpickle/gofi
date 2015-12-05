@@ -121,3 +121,38 @@ func TestReceiveMany(t *testing.T) {
 		t.Error("failed to read packets:", err)
 	}
 }
+
+func TestSend(t *testing.T) {
+	name, ok := defaultOSXInterfaceName()
+	if !ok {
+		t.Fatal("no default interface")
+	}
+	handle, err := newBpfHandle()
+	if err != nil {
+		t.Fatal("could not open handle:", err)
+	}
+	defer handle.Close()
+	if err := handle.SetInterface(name); err != nil {
+		t.Fatal("failed to set interface to: "+name+":", err)
+	}
+	if err := handle.SetupDataLink(); err != nil {
+		t.Error("failed to setup data link:", err)
+	}
+	if err := handle.BecomePromiscuous(); err != nil {
+		t.Fatal("failed to become promiscuous:", err)
+	}
+	if err := handle.SetHeaderComplete(true); err != nil {
+		t.Fatal("failed to enable header complete mode:", err)
+	}
+
+	// NOTE: this is a broadcast packet for a network called "PickleTown" on channel 11.
+	packetData := []byte("\x00\x00\x08\x00\x00\x00\x00\x00\x80\x00\x00\x00\xff\xff\xff\xff\xff\xff\x2e\xb0\x5d\x27\x56\xa9\x2e\xb0\x5d\x27\x56\xa9\x20\x77\xbb\x6a\x04\xd3\xe0\x00\x00\x00\xc8\x00\x11\x00\x00\x0a\x50\x69\x63\x6b\x6c\x65\x54\x6f\x77\x6e\x01\x08\x82\x84\x8b\x96\x24\x30\x48\x6c\x03\x01\x0b\x05\x04\x00\x02\x00\x00\x2a\x01\x00\x2f\x01\x00\x30\x14\x01\x00\x00\x0f\xac\x04\x01\x00\x00\x0f\xac\x04\x01\x00\x00\x0f\xac\x02\x00\x00\x32\x04\x0c\x12\x18\x60\x2d\x1a\xfc\x18\x1b\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x3d\x16\x0b\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xdd\x09\x00\x10\x18\x02\x00\xf0\x28\x00\x00\x05\x04\xde\x32")
+	packet, err := ParseMACPacket(packetData)
+	if err != nil {
+		t.Fatal("could not parse hard-coded MAC packet:", err)
+	}
+	
+	if err := handle.Send(packet); err != nil {
+		t.Fatal("could not send packet:", err)
+	}
+}

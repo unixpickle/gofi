@@ -98,7 +98,9 @@ func newOSXInterface(name string) (*osxInterface, error) {
 		return nil, errors.New("interface could not be opened: " + name)
 	}
 	res := &osxInterface{ptr}
-	runtime.SetFinalizer(res, res.free)
+	runtime.SetFinalizer(res, func(i *osxInterface) {
+		i.free()
+	})
 	return res, nil
 }
 

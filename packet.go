@@ -1,13 +1,19 @@
 package gofi
 
 type MACPacket struct {
-	// TODO: some fields here.
+	// TODO: have some legit fields here.
+	RawData []byte
 }
 
 // ParseMACPacket decodes a MAC packet.
 func ParseMACPacket(data []byte) (*MACPacket, error) {
-	// TODO: this.
-	return &MACPacket{}, nil
+	// TODO: do some actual parsing here.
+	return &MACPacket{data}, nil
+}
+
+func (m *MACPacket) Encode() []byte {
+	// TODO: do some legit encoding here.
+	return m.RawData
 }
 
 // RadioInfo contains supplemental information that some hardware supports.

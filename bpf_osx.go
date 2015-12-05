@@ -37,6 +37,11 @@ const ioctlBIOCGBLEN = 0x40044266
 // letting the application process incoming packets faster.
 const ioctlBIOCIMMEDIATE = 0x80044270
 
+// ioctlBIOCSHDRCMPLT is an ioctl command used to toggle "header complete"
+// on a BPF device.
+// When header complete is enabled, source MACs can be forged.
+const ioctlBIOCSHDRCMPLT = 0x80044275
+
 // ioctlIntegerSize is the number of bytes to use for integers before
 // safely passing them to ioctl calls.
 // Who knows when 128-bit processors will come out, but by then I'm sure
@@ -89,13 +94,11 @@ func (b *bpfHandle) Close() error {
 // You must call this before calling SetInterface() if you wish to read from the device.
 // This will return an error if the OS does not support the given buffer size.
 func (b *bpfHandle) SetReadBufferSize(size int) error {
-	numData := make([]byte, ioctlIntegerSize)
-	binary.LittleEndian.PutUint32(numData, uint32(size))
-
-	if ok, err := b.ioctlWithData(ioctlBIOCSBLEN, numData); !ok {
+	if ok, err := b.ioctlWithInt(ioctlBIOCSBLEN, size); !ok {
 		return err
 	}
 
+	numData := make([]byte, ioctlIntegerSize)
 	b.ioctlWithData(ioctlBIOCGBLEN, numData)
 	if binary.LittleEndian.Uint32(numData) < uint32(size) {
 		return errors.New("unsupported buffer size")
@@ -138,14 +141,11 @@ func (b *bpfHandle) SetInterface(name string) error {
 // SetupDataLink switches to a data-link type that provides raw 802.11 headers.
 // If no 802.11 DLT is supported on the interface, this returns an error.
 func (b *bpfHandle) SetupDataLink() error {
-	numBuf := make([]byte, ioctlIntegerSize)
-	numBuf[0] = dltIEEE802_11_RADIO
-	if ok, _ := b.ioctlWithData(ioctlBIOCSDLT, numBuf); ok {
+	if ok, _ := b.ioctlWithInt(ioctlBIOCSDLT, dltIEEE802_11_RADIO); ok {
 		b.dataLinkType = dltIEEE802_11_RADIO
 		return nil
 	}
-	numBuf[0] = dltIEEE802_11
-	if ok, _ := b.ioctlWithData(ioctlBIOCSDLT, numBuf); ok {
+	if ok, _ := b.ioctlWithInt(ioctlBIOCSDLT, dltIEEE802_11); ok {
 		b.dataLinkType = dltIEEE802_11
 		return nil
 	}
@@ -155,7 +155,7 @@ func (b *bpfHandle) SetupDataLink() error {
 // BecomePromiscuous enters promiscuous mode.
 // For more, see BIOCPROMISC at https://www.freebsd.org/cgi/man.cgi?bpf(4)
 func (b *bpfHandle) BecomePromiscuous() error {
-	if ok, err := b.ioctlWithInt(ioctlBIOCPROMISC, 0); ok {
+	if ok, err := b.ioctlWithData(ioctlBIOCPROMISC, nil); ok {
 		return nil
 	} else {
 		return err
@@ -166,11 +166,26 @@ func (b *bpfHandle) BecomePromiscuous() error {
 // While immediate mode is enabled, reads will return as soon as a
 // packet is available.
 func (b *bpfHandle) SetImmediate(flag bool) error {
-	numBuf := make([]byte, ioctlIntegerSize)
+	num := 0
 	if flag {
-		numBuf[0] = 1
+		num = 1
 	}
-	if ok, err := b.ioctlWithData(ioctlBIOCIMMEDIATE, numBuf); ok {
+	if ok, err := b.ioctlWithInt(ioctlBIOCIMMEDIATE, num); ok {
+		return nil
+	} else {
+		return err
+	}
+}
+
+// SetHeaderComplete toggles the "header complete" option.
+// When this option is enabled, link-level addresses (i.e. MACs) can be spoofed.
+// You should probably enable header complete mode before your first Send().
+func (b *bpfHandle) SetHeaderComplete(flag bool) error {
+	num := 0
+	if flag {
+		num = 1
+	}
+	if ok, err := b.ioctlWithInt(ioctlBIOCSHDRCMPLT, num); ok {
 		return nil
 	} else {
 		return err
@@ -190,6 +205,18 @@ func (b *bpfHandle) ReceiveMany() ([]RadioPacket, error) {
 			return nil, err
 		}
 		return b.parsePackets(b.readBuffer[:amount])
+	}
+}
+
+// Send writes a packet to the handle.
+func (b *bpfHandle) Send(p *MACPacket) error {
+	data := p.Encode()
+	if n, err := unix.Write(b.fd, data); err != nil {
+		return err
+	} else if n < len(data) {
+		return errors.New("full packet was not sent")
+	} else {
+		return nil
 	}
 }
 
@@ -243,8 +270,12 @@ func (b *bpfHandle) parsePacket(data []byte) (*RadioPacket, error) {
 }
 
 func (b *bpfHandle) ioctlWithData(command int, data []byte) (ok bool, err syscall.Errno) {
-	_, _, err = unix.Syscall(unix.SYS_IOCTL, uintptr(b.fd), uintptr(command),
-		uintptr(unsafe.Pointer(&data[0])))
+	if data != nil {
+		_, _, err = unix.Syscall(unix.SYS_IOCTL, uintptr(b.fd), uintptr(command),
+			uintptr(unsafe.Pointer(&data[0])))
+	} else {
+		_, _, err = unix.Syscall(unix.SYS_IOCTL, uintptr(b.fd), uintptr(command), uintptr(0))
+	}
 	if err != 0 {
 		return
 	} else {
@@ -253,12 +284,9 @@ func (b *bpfHandle) ioctlWithData(command int, data []byte) (ok bool, err syscal
 }
 
 func (b *bpfHandle) ioctlWithInt(command, argument int) (ok bool, err syscall.Errno) {
-	_, _, err = unix.Syscall(unix.SYS_IOCTL, uintptr(b.fd), uintptr(command), uintptr(argument))
-	if err != 0 {
-		return
-	} else {
-		return true, 0
-	}
+	numData := make([]byte, ioctlIntegerSize)
+	binary.LittleEndian.PutUint32(numData, uint32(argument))
+	return b.ioctlWithData(command, numData)
 }
 
 func align4(i int) int {
