@@ -31,6 +31,18 @@ const ioctlBIOCSBLEN = 0xc0044266
 // on a BPF device.
 const ioctlBIOCGBLEN = 0x40044266
 
+// ioctlBIOCIMMEDIATE is an ioctl command used to enable "immediate mode"
+// on a BPF device.
+// When immediate mode is enabled, packets are not buffered during reads,
+// letting the application process incoming packets faster.
+const ioctlBIOCIMMEDIATE = 0x80044270
+
+// ioctlIntegerSize is the number of bytes to use for integers before
+// safely passing them to ioctl calls.
+// Who knows when 128-bit processors will come out, but by then I'm sure
+// most of this code will be broken anyway.
+const ioctlIntegerSize = 8
+
 // dltIEEE802_11_RADIO is a data-link type for ioctlBIOCSDLT.
 // Read more here:
 // http://www.opensource.apple.com/source/tcpdump/tcpdump-16/tcpdump/ieee802_11_radio.h
@@ -77,7 +89,7 @@ func (b *bpfHandle) Close() error {
 // You must call this before calling SetInterface() if you wish to read from the device.
 // This will return an error if the OS does not support the given buffer size.
 func (b *bpfHandle) SetReadBufferSize(size int) error {
-	numData := make([]byte, 16)
+	numData := make([]byte, ioctlIntegerSize)
 	binary.LittleEndian.PutUint32(numData, uint32(size))
 
 	if ok, err := b.ioctlWithData(ioctlBIOCSBLEN, numData); !ok {
@@ -108,7 +120,9 @@ func (b *bpfHandle) SetReasonableBufferSize() error {
 
 // SetInterface assigns an interface name to the BPF handle.
 func (b *bpfHandle) SetInterface(name string) error {
-	data := make([]byte, 100)
+	// NOTE: I chose 128 bytes in order to be extremely cautious.
+	// Currently on OS X (10.11), the ifreq structure is only 32 bytes.
+	data := make([]byte, 128)
 	copy(data, []byte(name))
 	if ok, err := b.ioctlWithData(ioctlBIOCSETIF, data); ok {
 		return nil
@@ -124,7 +138,7 @@ func (b *bpfHandle) SetInterface(name string) error {
 // SetupDataLink switches to a data-link type that provides raw 802.11 headers.
 // If no 802.11 DLT is supported on the interface, this returns an error.
 func (b *bpfHandle) SetupDataLink() error {
-	numBuf := make([]byte, 16)
+	numBuf := make([]byte, ioctlIntegerSize)
 	numBuf[0] = dltIEEE802_11_RADIO
 	if ok, _ := b.ioctlWithData(ioctlBIOCSDLT, numBuf); ok {
 		b.dataLinkType = dltIEEE802_11_RADIO
@@ -142,6 +156,21 @@ func (b *bpfHandle) SetupDataLink() error {
 // For more, see BIOCPROMISC at https://www.freebsd.org/cgi/man.cgi?bpf(4)
 func (b *bpfHandle) BecomePromiscuous() error {
 	if ok, err := b.ioctlWithInt(ioctlBIOCPROMISC, 0); ok {
+		return nil
+	} else {
+		return err
+	}
+}
+
+// SetImmediate enables or disables immediate mode.
+// While immediate mode is enabled, reads will return as soon as a
+// packet is available.
+func (b *bpfHandle) SetImmediate(flag bool) error {
+	numBuf := make([]byte, ioctlIntegerSize)
+	if flag {
+		numBuf[0] = 1
+	}
+	if ok, err := b.ioctlWithData(ioctlBIOCIMMEDIATE, numBuf); ok {
 		return nil
 	} else {
 		return err

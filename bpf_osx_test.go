@@ -99,6 +99,9 @@ func TestReceiveMany(t *testing.T) {
 	if err := handle.BecomePromiscuous(); err != nil {
 		t.Fatal("failed to become promiscuous:", err)
 	}
+	if err := handle.SetImmediate(true); err != nil {
+		t.Fatal("failed to enter immediate mode:", err)
+	}
 
 	// NOTE: if no wireless access points are around, packets will never be received.
 	// To deal with this, we set a timeout after which we let the test pass automatically.
