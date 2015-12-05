@@ -1,20 +1,7 @@
 package gofi
 
-type MACPacket struct {
-	// TODO: have some legit fields here.
-	RawData []byte
-}
-
-// ParseMACPacket decodes a MAC packet.
-func ParseMACPacket(data []byte) (*MACPacket, error) {
-	// TODO: do some actual parsing here.
-	return &MACPacket{data}, nil
-}
-
-func (m *MACPacket) Encode() []byte {
-	// TODO: do some legit encoding here.
-	return m.RawData
-}
+// Frame represents an 802.11 frame (with an included checksum).
+type Frame []byte
 
 // RadioInfo contains supplemental information that some hardware supports.
 // Any unavailable fields will be set to 0.
@@ -35,6 +22,6 @@ type RadioInfo struct {
 }
 
 type RadioPacket struct {
-	MACPacket
+	Frame     Frame
 	RadioInfo *RadioInfo
 }

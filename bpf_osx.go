@@ -4,6 +4,7 @@ package gofi
 import (
 	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"strconv"
 	"syscall"
 	"unsafe"
@@ -209,11 +210,19 @@ func (b *bpfHandle) ReceiveMany() ([]RadioPacket, error) {
 }
 
 // Send writes a packet to the handle.
-func (b *bpfHandle) Send(p *MACPacket) error {
-	data := p.Encode()
-	if n, err := unix.Write(b.fd, data); err != nil {
+func (b *bpfHandle) Send(frame Frame) error {
+	sendData := frame
+
+	if b.dataLinkType == dltIEEE802_11_RADIO {
+		sendData = encodeRadiotapPacket(frame)
+	}
+
+	// NOTE: although dltIEEE802_11 doesn't give us checksums when receiving,
+	// it still expects checksums when we send. What a greedy snake!
+
+	if n, err := unix.Write(b.fd, sendData); err != nil {
 		return err
-	} else if n < len(data) {
+	} else if n < len(frame) {
 		return errors.New("full packet was not sent")
 	} else {
 		return nil
@@ -257,11 +266,12 @@ func (b *bpfHandle) parsePackets(data []byte) ([]RadioPacket, error) {
 
 func (b *bpfHandle) parsePacket(data []byte) (*RadioPacket, error) {
 	if b.dataLinkType == dltIEEE802_11 {
-		if mac, err := ParseMACPacket(data); err != nil {
-			return nil, err
-		} else {
-			return &RadioPacket{*mac, nil}, nil
-		}
+		// NOTE: we must add a checksum, because all Frames have checksums.
+		checksum := crc32.ChecksumIEEE(data)
+		frame := make(Frame, len(data)+4)
+		copy(frame, data)
+		binary.LittleEndian.PutUint32(frame[len(data):], checksum)
+		return &RadioPacket{frame, nil}, nil
 	} else if b.dataLinkType == dltIEEE802_11_RADIO {
 		return parseRadiotapPacket(data)
 	} else {

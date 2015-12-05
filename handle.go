@@ -9,10 +9,10 @@ type Handle interface {
 	SetChannel(int) error
 
 	// Receive reads the next packet from the device.
-	Receive() (*MACPacket, *RadioInfo, error)
+	Receive() (Frame, *RadioInfo, error)
 
 	// Send sends a packet over the device.
-	Send(*MACPacket) error
+	Send(Frame) error
 
 	// Close closes the handle.
 	// You should always close a Handle after being done with it.

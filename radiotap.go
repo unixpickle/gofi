@@ -1,6 +1,10 @@
 package gofi
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"errors"
+	"hash/crc32"
+)
 
 type radiotapFieldInfo struct {
 	Alignment int
@@ -28,10 +32,17 @@ var radiotapFields []radiotapFieldInfo = []radiotapFieldInfo{
 }
 
 const (
+	radiotapFlags         = 1
 	radiotapChannel       = 3
 	radiotapSignalPower   = 5
 	radiotapNoisePower    = 6
 	radiotapTransmitPower = 10
+)
+
+// These are some radiotap flags, taken from http://www.radiotap.org/defined-fields/Flags.
+const (
+	radiotapFlagHasFCS     = 0x10
+	radiotapFlagHasPadding = 0x20
 )
 
 func parseRadiotapPacket(data []byte) (*RadioPacket, error) {
@@ -55,6 +66,7 @@ func parseRadiotapPacket(data []byte) (*RadioPacket, error) {
 
 	var radioInfo RadioInfo
 	var fieldOffset int
+	var flags int
 	for i, info := range radiotapFields {
 		if (presentFlags & (1 << uint(i))) == 0 {
 			continue
@@ -66,6 +78,8 @@ func parseRadiotapPacket(data []byte) (*RadioPacket, error) {
 			return nil, ErrBufferUnderflow
 		}
 		switch i {
+		case radiotapFlags:
+			flags = int(dataFields[fieldOffset])
 		case radiotapChannel:
 			radioInfo.Frequency = int(binary.LittleEndian.Uint16(dataFields[fieldOffset:]))
 		case radiotapNoisePower:
@@ -78,10 +92,28 @@ func parseRadiotapPacket(data []byte) (*RadioPacket, error) {
 		fieldOffset += info.Size
 	}
 
-	macPacket, err := ParseMACPacket(data[headerSize:])
-	if err != nil {
-		return nil, err
+	frame := Frame(data[headerSize:])
+
+	if (flags & radiotapFlagHasPadding) != 0 {
+		return nil, errors.New("radiotap frame padding is unsupported")
 	}
 
-	return &RadioPacket{*macPacket, &radioInfo}, nil
+	// Add a checksum if one was not present, since all Frames must have checksums.
+	if (flags & radiotapFlagHasFCS) == 0 {
+		checksum := crc32.ChecksumIEEE(frame)
+		newFrame := make([]byte, len(frame)+4)
+		copy(newFrame, frame)
+		binary.LittleEndian.PutUint32(newFrame[len(frame):], checksum)
+		frame = newFrame
+	}
+
+	return &RadioPacket{frame, &radioInfo}, nil
+}
+
+// encodeRadiotapPacket generates a radiotap buffer which contains a Frame.
+func encodeRadiotapPacket(f Frame) []byte {
+	// Generate a radiotap header with length 9, the FLAGS value, and a flag
+	// indicating that the packet includes a checksum.
+	header := []byte{0, 0, 9, 0, radiotapFlags, 0, 0, 0, radiotapFlagHasFCS}
+	return append(header, f...)
 }
