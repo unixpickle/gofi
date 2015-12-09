@@ -5,6 +5,7 @@ package gofi
 import (
 	"errors"
 	"sync"
+	"time"
 )
 
 // DefaultInterfaceName returns the name of the default WiFi device on this machine.
@@ -62,6 +63,9 @@ func setupBpfHandle(handle *bpfHandle, iname string) error {
 	if err := handle.SetHeaderComplete(true); err != nil {
 		return err
 	}
+	if err := handle.SetReadTimeout(time.Second); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -71,19 +75,17 @@ type readBufferNode struct {
 }
 
 type osxHandle struct {
-	bpfHandle *bpfHandle
+	bpfHandleLock sync.RWMutex
+	bpfHandle     *bpfHandle
 
 	osxInterfaceLock sync.Mutex
 	osxInterface     *osxInterface
 
-	readLock        sync.Mutex
+	receiveLock     sync.Mutex
 	readBufferFirst *readBufferNode
 	readBufferLast  *readBufferNode
 
-	writeLock sync.Mutex
-
-	closeLock sync.Mutex
-	closed    bool
+	sendLock sync.Mutex
 }
 
 func (h *osxHandle) SupportedChannels() []Channel {
@@ -105,23 +107,12 @@ func (h *osxHandle) SetChannel(ch Channel) error {
 }
 
 func (h *osxHandle) Receive() (Frame, *RadioInfo, error) {
-	h.readLock.Lock()
-	defer h.readLock.Unlock()
+	h.receiveLock.Lock()
+	defer h.receiveLock.Unlock()
 
 	if h.readBufferFirst == nil {
-		packets, err := h.bpfHandle.ReceiveMany()
-		if err != nil {
+		if err := h.populateReadBuffer(); err != nil {
 			return nil, nil, err
-		}
-		for _, packet := range packets {
-			node := &readBufferNode{packet, nil}
-			if h.readBufferFirst == nil {
-				h.readBufferFirst = node
-				h.readBufferLast = node
-			} else {
-				h.readBufferLast.next = node
-				h.readBufferLast = node
-			}
 		}
 	}
 
@@ -134,17 +125,55 @@ func (h *osxHandle) Receive() (Frame, *RadioInfo, error) {
 }
 
 func (h *osxHandle) Send(f Frame) error {
-	h.writeLock.Lock()
-	defer h.writeLock.Unlock()
-	return h.bpfHandle.Send(f)
+	h.sendLock.Lock()
+	defer h.sendLock.Unlock()
+
+	h.bpfHandleLock.RLock()
+	defer h.bpfHandleLock.RUnlock()
+
+	if h.bpfHandle != nil {
+		return h.bpfHandle.Send(f)
+	} else {
+		return ErrClosed
+	}
 }
 
 func (h *osxHandle) Close() {
-	h.closeLock.Lock()
-	defer h.closeLock.Unlock()
-	if h.closed {
-		return
-	}
-	h.closed = true
+	h.bpfHandleLock.Lock()
+	defer h.bpfHandleLock.Unlock()
 	h.bpfHandle.Close()
+	h.bpfHandle = nil
+}
+
+// populateReadBuffer reads more packets from the handle.
+// The caller must be holding h.receiveLock.
+func (h *osxHandle) populateReadBuffer() error {
+	for {
+		h.bpfHandleLock.RLock()
+		if h.bpfHandle == nil {
+			h.bpfHandleLock.RUnlock()
+			return ErrClosed
+		}
+		packets, err := h.bpfHandle.ReceiveMany()
+		h.bpfHandleLock.RUnlock()
+
+		if err == errBPFReadTimeout {
+			continue
+		} else if err != nil {
+			return err
+		}
+
+		for _, packet := range packets {
+			node := &readBufferNode{packet, nil}
+			if h.readBufferFirst == nil {
+				h.readBufferFirst = node
+				h.readBufferLast = node
+			} else {
+				h.readBufferLast.next = node
+				h.readBufferLast = node
+			}
+		}
+
+		return nil
+	}
 }

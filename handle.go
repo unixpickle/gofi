@@ -62,5 +62,10 @@ type Handle interface {
 
 	// Close closes the handle.
 	// You should always close a Handle once you are done with it.
+	//
+	// Close synchronously terminates pending Receive() calls.
+	// While there is no strict time limit for how long this should take,
+	// Close is guaranteed to terminate Receive() calls eventually even if
+	// no data is read.
 	Close()
 }

@@ -56,8 +56,3 @@ if err := handle.Send(frame); err != nil {
     // Could not send the packet! Did you remember to compute the trailing checksum?
 }
 ```
-
-# TODO
-
- * Prevent blocking when calling Close() while doing a Receive()
- * Avoid possible race condition of Closing before some other BPF operation.
