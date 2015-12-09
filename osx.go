@@ -86,16 +86,22 @@ type osxHandle struct {
 	closed    bool
 }
 
-func (h *osxHandle) Channel() int {
+func (h *osxHandle) SupportedChannels() []Channel {
+	h.osxInterfaceLock.Lock()
+	defer h.osxInterfaceLock.Unlock()
+	return h.osxInterface.SupportedChannels()
+}
+
+func (h *osxHandle) Channel() Channel {
 	h.osxInterfaceLock.Lock()
 	defer h.osxInterfaceLock.Unlock()
 	return h.osxInterface.Channel()
 }
 
-func (h *osxHandle) SetChannel(i int) error {
+func (h *osxHandle) SetChannel(ch Channel) error {
 	h.osxInterfaceLock.Lock()
 	defer h.osxInterfaceLock.Unlock()
-	return h.osxInterface.SetChannel(i)
+	return h.osxInterface.SetChannel(ch)
 }
 
 func (h *osxHandle) Receive() (Frame, *RadioInfo, error) {

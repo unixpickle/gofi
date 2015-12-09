@@ -37,26 +37,62 @@ void freeInterface(void * iface) {
 	[pool release];
 }
 
-bool setChannel(void * iface, int number) {
+bool setChannel(void * iface, int number, int width) {
 	NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
 	CWInterface * interface = (CWInterface *)iface;
 	NSSet * channels = [interface supportedWLANChannels];
 	BOOL success = false;
 	for (CWChannel * channel in channels) {
-		if ([channel channelNumber] == (NSInteger)number) {
-			success = [interface setWLANChannel:channel error:nil];
-			break;
+		if ([channel channelNumber] != (NSInteger)number) {
+			continue;
 		}
+		if (width == 20 && [channel channelWidth] != kCWChannelWidth20MHz) {
+			continue;
+		} else if (width == 40 && [channel channelWidth] != kCWChannelWidth40MHz) {
+			continue;
+		}
+		success = [interface setWLANChannel:channel error:nil];
+		break;
 	}
 	[pool release];
 	return success;
 }
 
-int getChannel(void * iface) {
+void getChannel(void * iface, int * number, int * width) {
 	NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
-	int res = (int)[(CWInterface *)iface wlanChannel].channelNumber;
+	CWChannel * ch = [(CWInterface *)iface wlanChannel];
+	*number = (int)ch.channelNumber;
+	if (ch.channelWidth == kCWChannelWidth20MHz) {
+		*width = 20;
+	} else if (ch.channelWidth == kCWChannelWidth40MHz) {
+		*width = 40;
+	}
+	[pool release];
+}
+
+int supportedChannelCount(void * iface) {
+	NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
+	int res = [[(CWInterface *)iface supportedWLANChannels] count];
 	[pool release];
 	return res;
+}
+
+void supportedChannels(void * iface, int * numbers, int * widths, int maxLen) {
+	NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
+	NSSet * s = [(CWInterface *)iface supportedWLANChannels];
+	int i = 0;
+	for (CWChannel * ch in s) {
+		if (i == maxLen) {
+			break;
+		}
+		if (ch.channelWidth == kCWChannelWidth20MHz) {
+			widths[i] = 20;
+		} else if (ch.channelWidth == kCWChannelWidth40MHz) {
+			widths[i] = 40;
+		}
+		numbers[i++] = (int)ch.channelNumber;
+	}
+	[pool release];
 }
 
 void disassociate(void * iface) {
@@ -70,7 +106,6 @@ import "C"
 import (
 	"errors"
 	"runtime"
-	"strconv"
 	"unsafe"
 )
 
@@ -105,17 +140,42 @@ func newOSXInterface(name string) (*osxInterface, error) {
 	return res, nil
 }
 
-// Channel returns the interface's current channel number.
-func (i *osxInterface) Channel() int {
-	return int(C.getChannel(i.ptr))
+// SupportedChannels generates an list of supported channels in
+// an unspecified order.
+func (i *osxInterface) SupportedChannels() []Channel {
+	count := C.supportedChannelCount(i.ptr)
+	numbers := make([]C.int, int(count))
+	widths := make([]C.int, int(count))
+	C.supportedChannels(i.ptr, (*C.int)(&numbers[0]), (*C.int)(&widths[0]), count)
+
+	res := make([]Channel, int(count))
+	for i := range res {
+		res[i] = Channel{
+			Number: int(numbers[i]),
+			Width:  NewChannelWidthMegahertz(int(widths[i])),
+		}
+	}
+
+	return res
 }
 
-// SetChannel switches to a channel given its number.
-func (i *osxInterface) SetChannel(channelNumber int) error {
-	if bool(C.setChannel(i.ptr, C.int(channelNumber))) {
+// Channel returns the interface's current channel number.
+func (i *osxInterface) Channel() Channel {
+	var number, width C.int
+	C.getChannel(i.ptr, &number, &width)
+	return Channel{
+		Number: int(number),
+		Width:  NewChannelWidthMegahertz(int(width)),
+	}
+}
+
+// SetChannel switches to a channel.
+func (i *osxInterface) SetChannel(c Channel) error {
+	res := C.setChannel(i.ptr, C.int(c.Number), C.int(c.Width.Megahertz()))
+	if bool(res) {
 		return nil
 	} else {
-		return errors.New("could not switch to channel: " + strconv.Itoa(channelNumber))
+		return errors.New("could not switch to channel")
 	}
 }
 
