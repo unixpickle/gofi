@@ -4,7 +4,7 @@ package gofi
 type ChannelWidth int
 
 const (
-	ChannelWidthUnknown = iota
+	ChannelWidthUnspecified = iota
 	ChannelWidth20MHz
 	ChannelWidth40MHz
 )
@@ -19,7 +19,7 @@ func NewChannelWidthMegahertz(mhz int) ChannelWidth {
 	case 40:
 		return ChannelWidth40MHz
 	default:
-		return ChannelWidthUnknown
+		return ChannelWidthUnspecified
 	}
 }
 
@@ -48,6 +48,8 @@ type Handle interface {
 	Channel() Channel
 
 	// SetChannel tunes the device into a given WLAN channel.
+	// If the channel width is unspecified, the handle will automatically
+	// choose an appropriate one.
 	SetChannel(Channel) error
 
 	// Receive reads the next packet from the device.
