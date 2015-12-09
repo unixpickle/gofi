@@ -8,6 +8,7 @@ import (
 	"hash/crc32"
 	"strconv"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -44,6 +45,10 @@ const ioctlBIOCIMMEDIATE = 0x80044270
 // When header complete is enabled, source MACs can be forged.
 const ioctlBIOCSHDRCMPLT = 0x80044275
 
+// ioctlBIOCSRTIMEOUT is an ioctl command used to set the read timeout
+// on a BPF device.
+const ioctlBIOCSRTIMEOUT = 0x8010426d
+
 // ioctlIntegerSize is the number of bytes to use for integers before
 // safely passing them to ioctl calls.
 // Who knows when 128-bit processors will come out, but by then I'm sure
@@ -58,6 +63,8 @@ const dltIEEE802_11_RADIO = 127
 // dltIEEE802_11 is a data-link type for ioctlBIOCSDLT.
 // This data-link type captures 802.11 headers with no extra info.
 const dltIEEE802_11 = 105
+
+var errBPFReadTimeout = errors.New("BPF read timeout exceeded")
 
 type bpfHandle struct {
 	fd           int
@@ -87,7 +94,9 @@ func newBpfHandle() (*bpfHandle, error) {
 	}
 }
 
-// Close closes the underlying socket, terminating all send and receive operations.
+// Close closes the underlying socket.
+// You should not call this while any send or receive operations are taking place.
+// After closing the handle, you should not call any other methods on it.
 func (b *bpfHandle) Close() error {
 	return unix.Close(b.fd)
 }
@@ -179,6 +188,19 @@ func (b *bpfHandle) SetImmediate(flag bool) error {
 	}
 }
 
+// SetReadTimeout sets the amount of time before a ReceiveMany will fail with
+// errBPFReadTimeout.
+func (b *bpfHandle) SetReadTimeout(d time.Duration) error {
+	value := make([]byte, 16)
+	binary.LittleEndian.PutUint64(value, uint64(d/time.Second))
+	binary.LittleEndian.PutUint64(value[8:], uint64((d%time.Second)/time.Microsecond))
+	if ok, err := b.ioctlWithData(ioctlBIOCSRTIMEOUT, value); ok {
+		return nil
+	} else {
+		return err
+	}
+}
+
 // SetHeaderComplete toggles the "header complete" option.
 // When this option is enabled, link-level addresses (i.e. MACs) can be spoofed.
 // You should probably enable header complete mode before your first Send().
@@ -203,6 +225,8 @@ func (b *bpfHandle) ReceiveMany() ([]RadioPacket, error) {
 			continue
 		} else if err == unix.ENXIO {
 			return nil, errors.New("device is down")
+		} else if err == unix.ETIMEDOUT || amount == 0 {
+			return nil, errBPFReadTimeout
 		} else if err != nil {
 			return nil, err
 		}

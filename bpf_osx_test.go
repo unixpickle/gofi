@@ -143,6 +143,9 @@ func TestSend(t *testing.T) {
 	if err := handle.BecomePromiscuous(); err != nil {
 		t.Fatal("failed to become promiscuous:", err)
 	}
+	if err := handle.SetImmediate(true); err != nil {
+		t.Fatal("failed to enter immediate mode:", err)
+	}
 	if err := handle.SetHeaderComplete(true); err != nil {
 		t.Fatal("failed to enable header complete mode:", err)
 	}
@@ -152,5 +155,61 @@ func TestSend(t *testing.T) {
 
 	if err := handle.Send(frame); err != nil {
 		t.Fatal("could not send packet:", err)
+	}
+}
+
+func TestReadTimeout(t *testing.T) {
+	name, ok := defaultOSXInterfaceName()
+	if !ok {
+		t.Fatal("no default interface")
+	}
+	handle, err := newBpfHandle()
+	if err != nil {
+		t.Fatal("could not open handle:", err)
+	}
+	defer handle.Close()
+	if err := handle.SetReadBufferSize(0x1000); err != nil {
+		t.Fatal("failed to set read buffer size:", err)
+	}
+	if err := handle.SetInterface(name); err != nil {
+		t.Fatal("failed to set interface to: "+name+":", err)
+	}
+	if err := handle.SetupDataLink(); err != nil {
+		t.Error("failed to setup data link:", err)
+	}
+	if err := handle.BecomePromiscuous(); err != nil {
+		t.Fatal("failed to become promiscuous:", err)
+	}
+	if err := handle.SetHeaderComplete(true); err != nil {
+		t.Fatal("failed to enable header complete mode:", err)
+	}
+	if err := handle.SetReadTimeout(time.Millisecond); err != nil {
+		t.Fatal("failed to set read timeout:", err)
+	}
+
+	doneChan := make(chan error)
+	timeoutChan := time.After(time.Second * 2)
+	go func() {
+		// If we keep reading really fast, eventually we should hit a 1ms timeout
+		// unless there is REALLY high traffic on the channel.
+		for {
+			select {
+			case <-timeoutChan:
+				close(doneChan)
+				return
+			default:
+			}
+			if _, err := handle.ReceiveMany(); err != nil {
+				doneChan <- err
+				return
+			}
+		}
+	}()
+
+	endError := <-doneChan
+	if endError == nil {
+		t.Fatal("test timed out")
+	} else if endError != errBPFReadTimeout {
+		t.Fatal("unexpected error:", endError)
 	}
 }
