@@ -30,7 +30,7 @@ handle, err := gofi.NewHandle(name)
 Since WiFi communications can take place on any number of channels, you will most likely want to hop channels immediately. You can do this using the `SetChannel` function:
 
 ```go
-handle.SetChannel(11)
+handle.SetChannel(gofi.Channel{Number: 11})
 ```
 
 Once you're tuned into a channel, you can receive packets using the `Receive` function. For example:
