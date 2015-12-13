@@ -117,6 +117,6 @@ func parseRadiotapPacket(data []byte) (*RadioPacket, error) {
 func encodeRadiotapPacket(f Frame) []byte {
 	// Generate a radiotap header with length 9, the FLAGS value, and a flag
 	// indicating that the packet includes a checksum.
-	header := []byte{0, 0, 9, 0, radiotapFlags, 0, 0, 0, radiotapFlagHasFCS}
+	header := []byte{0, 0, 9, 0, 1 << radiotapFlags, 0, 0, 0, radiotapFlagHasFCS}
 	return append(header, f...)
 }
