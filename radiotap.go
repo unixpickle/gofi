@@ -33,6 +33,7 @@ var radiotapFields []radiotapFieldInfo = []radiotapFieldInfo{
 
 const (
 	radiotapFlags         = 1
+	radiotapRate          = 2
 	radiotapChannel       = 3
 	radiotapSignalPower   = 5
 	radiotapNoisePower    = 6
@@ -80,6 +81,8 @@ func parseRadiotapPacket(data []byte) (*RadioPacket, error) {
 		switch i {
 		case radiotapFlags:
 			flags = int(dataFields[fieldOffset])
+		case radiotapRate:
+			radioInfo.Rate = int(dataFields[fieldOffset])
 		case radiotapChannel:
 			radioInfo.Frequency = int(binary.LittleEndian.Uint16(dataFields[fieldOffset:]))
 		case radiotapNoisePower:

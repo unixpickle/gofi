@@ -19,6 +19,10 @@ type RadioInfo struct {
 	// More info can be found here under IEEE80211_RADIOTAP_DBM_TX_POWER:
 	// http://www.opensource.apple.com/source/tcpdump/tcpdump-16/tcpdump/ieee802_11_radio.h
 	TransmitPower int
+
+	// Rate is the transmit rate, measured in multiples of 500Kb/s.
+	// If this is 0, then the rate is unknown.
+	Rate int
 }
 
 type RadioPacket struct {
