@@ -3,7 +3,6 @@
 package gofi
 
 import (
-	"errors"
 	"sync"
 	"time"
 )
@@ -11,11 +10,7 @@ import (
 // DefaultInterfaceName returns the name of the default WiFi device on this machine.
 // If the machine has no default WiFi device, this returns an error.
 func DefaultInterfaceName() (string, error) {
-	if res, ok := defaultOSXInterfaceName(); !ok {
-		return "", errors.New("no WiFi devices found")
-	} else {
-		return res, nil
-	}
+	return defaultOSXInterfaceName()
 }
 
 // NewHandle creates a new handle with the given interface name.
@@ -91,19 +86,31 @@ type osxHandle struct {
 func (h *osxHandle) SupportedChannels() []Channel {
 	h.osxInterfaceLock.Lock()
 	defer h.osxInterfaceLock.Unlock()
-	return h.osxInterface.SupportedChannels()
+	if h.osxInterface == nil {
+		return []Channel{}
+	} else {
+		return h.osxInterface.SupportedChannels()
+	}
 }
 
 func (h *osxHandle) Channel() Channel {
 	h.osxInterfaceLock.Lock()
 	defer h.osxInterfaceLock.Unlock()
-	return h.osxInterface.Channel()
+	if h.osxInterface == nil {
+		return Channel{}
+	} else {
+		return h.osxInterface.Channel()
+	}
 }
 
 func (h *osxHandle) SetChannel(ch Channel) error {
 	h.osxInterfaceLock.Lock()
 	defer h.osxInterfaceLock.Unlock()
-	return h.osxInterface.SetChannel(ch)
+	if h.osxInterface == nil {
+		return ErrClosed
+	} else {
+		return h.osxInterface.SetChannel(ch)
+	}
 }
 
 func (h *osxHandle) Receive() (Frame, *RadioInfo, error) {
@@ -140,9 +147,14 @@ func (h *osxHandle) Send(f Frame) error {
 
 func (h *osxHandle) Close() {
 	h.bpfHandleLock.Lock()
-	defer h.bpfHandleLock.Unlock()
 	h.bpfHandle.Close()
 	h.bpfHandle = nil
+	h.bpfHandleLock.Unlock()
+
+	h.osxInterfaceLock.Lock()
+	h.osxInterface.Close()
+	h.osxInterface = nil
+	h.osxInterfaceLock.Unlock()
 }
 
 // populateReadBuffer reads more packets from the handle.

@@ -2,190 +2,192 @@
 
 package gofi
 
-/*
-#cgo CFLAGS: -x objective-c
-#cgo LDFLAGS: -framework CoreWLAN -framework Foundation
-#import <CoreWLAN/CoreWLAN.h>
-#include <stddef.h>
-
-char * defaultInterface() {
-	NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
-	CWInterface * iface = [[CWWiFiClient sharedWiFiClient] interface];
-	if (!iface) {
-		[pool release];
-		return NULL;
-	}
-	const char * name = [[iface interfaceName] UTF8String];
-	char * res = malloc(strlen(name) + 1);
-	strcpy(res, name);
-	[pool release];
-	return res;
-}
-
-void * createInterface(char * name) {
-	NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
-	NSString * nameStr = [NSString stringWithUTF8String:name];
-	free(name);
-	void * res = (void *)[[[CWWiFiClient sharedWiFiClient] interfaceWithName:nameStr] retain];
-	[pool release];
-	return res;
-}
-
-void freeInterface(void * iface) {
-	NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
-	[(CWInterface *)iface release];
-	[pool release];
-}
-
-bool setChannel(void * iface, int number, int width) {
-	NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
-	CWInterface * interface = (CWInterface *)iface;
-	NSSet * channels = [interface supportedWLANChannels];
-	BOOL success = false;
-	for (CWChannel * channel in channels) {
-		if ([channel channelNumber] != (NSInteger)number) {
-			continue;
-		}
-		if (width == 20 && [channel channelWidth] != kCWChannelWidth20MHz) {
-			continue;
-		} else if (width == 40 && [channel channelWidth] != kCWChannelWidth40MHz) {
-			continue;
-		}
-		success = [interface setWLANChannel:channel error:nil];
-		break;
-	}
-	[pool release];
-	return success;
-}
-
-void getChannel(void * iface, int * number, int * width) {
-	NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
-	CWChannel * ch = [(CWInterface *)iface wlanChannel];
-	*number = (int)ch.channelNumber;
-	if (ch.channelWidth == kCWChannelWidth20MHz) {
-		*width = 20;
-	} else if (ch.channelWidth == kCWChannelWidth40MHz) {
-		*width = 40;
-	}
-	[pool release];
-}
-
-int supportedChannelCount(void * iface) {
-	NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
-	int res = [[(CWInterface *)iface supportedWLANChannels] count];
-	[pool release];
-	return res;
-}
-
-void supportedChannels(void * iface, int * numbers, int * widths, int maxLen) {
-	NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
-	NSSet * s = [(CWInterface *)iface supportedWLANChannels];
-	int i = 0;
-	for (CWChannel * ch in s) {
-		if (i == maxLen) {
-			break;
-		}
-		if (ch.channelWidth == kCWChannelWidth20MHz) {
-			widths[i] = 20;
-		} else if (ch.channelWidth == kCWChannelWidth40MHz) {
-			widths[i] = 40;
-		}
-		numbers[i++] = (int)ch.channelNumber;
-	}
-	[pool release];
-}
-
-void disassociate(void * iface) {
-	NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
-	[(CWInterface *)iface disassociate];
-	[pool release];
-}
-*/
-import "C"
-
 import (
+	"encoding/binary"
 	"errors"
-	"runtime"
+	"net"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
-// An osxInterface makes it possible to interact with CoreWLAN on OS X.
+// These ioctl()s are used for Apple's 802.11 ioctl API,
+// as shown in apple80211_ioctl.h.
+const (
+	ioctlSIOCSA80211 = 0x802869c8
+	ioctlSIOCGA80211 = 0xc02869c9
+)
+
+// These are the commands used in Apple's 802.11 ioctl API.
+const (
+	a80211CmdChannel           = 4
+	a80211CmdCardCapabilities  = 12
+	a80211CmdDisassociate      = 22
+	a80211CmdSupportedChannels = 27
+)
+
+const a80211MaxChannelCount = 64
+
+// An osxInterface makes it possible to interact with Apple's 802.11
+// ioctl API.
 type osxInterface struct {
-	ptr unsafe.Pointer
+	fd   int
+	name string
 }
 
 // defaultOSXInterfaceName returns the name of the default interface.
 // If no interface exists, the ok value is set to false.
-func defaultOSXInterfaceName() (name string, ok bool) {
-	ptr := C.defaultInterface()
-	if ptr == nil {
-		return "", false
+func defaultOSXInterfaceName() (string, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return "", err
 	}
-	s := C.GoString(ptr)
-	C.free(unsafe.Pointer(ptr))
-	return s, true
+
+	for _, iface := range interfaces {
+		if i, err := newOSXInterface(iface.Name); err == nil {
+			i.Disassociate()
+			i.Close()
+			return iface.Name, nil
+		}
+	}
+
+	return "", errors.New("no WiFi devices found")
 }
 
 // newOSXInterface creates an interface given a name.
 // This fails if the interface cannot be found or is not a WiFi device.
 func newOSXInterface(name string) (*osxInterface, error) {
-	ptr := C.createInterface(C.CString(name))
-	if ptr == nil {
-		return nil, errors.New("interface could not be opened: " + name)
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
+	if fd < 0 {
+		return nil, err
 	}
-	res := &osxInterface{ptr}
-	runtime.SetFinalizer(res, func(i *osxInterface) {
-		i.free()
-	})
-	return res, nil
+	iface := &osxInterface{fd, name}
+	buf := make([]byte, 8)
+
+	// NOTE: getting the capabilities is a simple way to make sure that the interface
+	// exists and is a WiFi device.
+	if err := iface.get(a80211CmdCardCapabilities, buf); err != nil {
+		return nil, err
+	}
+
+	return iface, nil
 }
 
 // SupportedChannels generates an list of supported channels in
 // an unspecified order.
-func (i *osxInterface) SupportedChannels() []Channel {
-	count := C.supportedChannelCount(i.ptr)
-	numbers := make([]C.int, int(count))
-	widths := make([]C.int, int(count))
-	C.supportedChannels(i.ptr, (*C.int)(&numbers[0]), (*C.int)(&widths[0]), count)
-
-	res := make([]Channel, int(count))
-	for i := range res {
-		res[i] = Channel{
-			Number: int(numbers[i]),
-			Width:  NewChannelWidthMegahertz(int(widths[i])),
-		}
+func (iface *osxInterface) SupportedChannels() []Channel {
+	resultData := make([]byte, 8+(a80211MaxChannelCount*12))
+	if err := iface.get(a80211CmdSupportedChannels, resultData); err != nil {
+		return []Channel{}
 	}
-
+	count := int(binary.LittleEndian.Uint32(resultData[4:]))
+	if count > a80211MaxChannelCount {
+		panic("channel overflow")
+	}
+	res := []Channel{}
+	for i := 0; i < count; i++ {
+		offset := 8 + 12*i
+		res = append(res, decodeA80211ChannelDesc(resultData[offset:]))
+	}
 	return res
 }
 
 // Channel returns the interface's current channel number.
 func (i *osxInterface) Channel() Channel {
-	var number, width C.int
-	C.getChannel(i.ptr, &number, &width)
-	return Channel{
-		Number: int(number),
-		Width:  NewChannelWidthMegahertz(int(width)),
+	data := make([]byte, 16)
+	if err := i.get(a80211CmdChannel, data); err != nil {
+		return Channel{}
 	}
+	return decodeA80211ChannelDesc(data[4:])
 }
 
 // SetChannel switches to a channel.
-func (i *osxInterface) SetChannel(c Channel) error {
-	res := C.setChannel(i.ptr, C.int(c.Number), C.int(c.Width.Megahertz()))
-	if bool(res) {
-		return nil
-	} else {
-		return errors.New("could not switch to channel")
+func (iface *osxInterface) SetChannel(c Channel) error {
+	resultData := make([]byte, 8+(a80211MaxChannelCount*12))
+	if err := iface.get(a80211CmdSupportedChannels, resultData); err != nil {
+		return err
 	}
+	count := int(binary.LittleEndian.Uint32(resultData[4:]))
+	if count > a80211MaxChannelCount {
+		panic("channel overflow")
+	}
+	for i := 0; i < count; i++ {
+		offset := 8 + 12*i
+		ch := decodeA80211ChannelDesc(resultData[offset:])
+		if ch == c {
+			data := make([]byte, 16)
+
+			binary.LittleEndian.PutUint32(data, 1)
+			copy(data[4:], resultData[offset:])
+
+			return iface.set(a80211CmdChannel, 0, data)
+		}
+	}
+	return errors.New("unknown channel")
 }
 
 // Disassociate disconnects the interface from the current network.
 // On El Capitan, it is usually necessary to disassociate before
 // entering promiscuous mode.
 func (i *osxInterface) Disassociate() {
-	C.disassociate(i.ptr)
+	data := make([]byte, 12)
+	i.set(a80211CmdDisassociate, 0, data)
 }
 
-func (i *osxInterface) free() {
-	C.freeInterface(i.ptr)
+// Close closes the interface socket.
+// After you call this, you should not call anything else
+// on the interface.
+func (i *osxInterface) Close() {
+	unix.Close(i.fd)
+}
+
+func (i *osxInterface) get(cmd int, data []byte) error {
+	inStruct := make([]byte, 40+len(data))
+	copy(inStruct[:16], []byte(i.name))
+	binary.LittleEndian.PutUint32(inStruct[16:], uint32(cmd))
+	binary.LittleEndian.PutUint32(inStruct[24:], uint32(len(data)))
+	if err := i.ioctlWithData(ioctlSIOCGA80211, inStruct); err != nil {
+		return err
+	}
+	copy(data, inStruct[40:])
+	return nil
+}
+
+func (i *osxInterface) set(cmd int, val int, data []byte) error {
+	inStruct := make([]byte, 40+len(data))
+	copy(inStruct[:16], []byte(i.name))
+	binary.LittleEndian.PutUint32(inStruct[16:], uint32(cmd))
+	binary.LittleEndian.PutUint32(inStruct[20:], uint32(val))
+	binary.LittleEndian.PutUint32(inStruct[24:], uint32(len(data)))
+	copy(inStruct[40:], data)
+	if err := i.ioctlWithData(ioctlSIOCSA80211, inStruct); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (i *osxInterface) ioctlWithData(command int, data []byte) error {
+	unsafeData := unsafe.Pointer(&data[0])
+	binary.LittleEndian.PutUint64(data[32:], uint64(uintptr(unsafeData)+40))
+
+	_, _, err := unix.Syscall(unix.SYS_IOCTL, uintptr(i.fd), uintptr(command),
+		uintptr(unsafeData))
+
+	if err != 0 {
+		return err
+	} else {
+		return nil
+	}
+}
+
+func decodeA80211ChannelDesc(desc []byte) Channel {
+	var ch Channel
+	ch.Width = ChannelWidth20MHz
+	ch.Number = int(binary.LittleEndian.Uint32(desc[4:]))
+
+	flags := binary.LittleEndian.Uint32(desc[8:])
+	if (flags & (1 << 2)) != 0 {
+		ch.Width = ChannelWidth40MHz
+	}
+	return ch
 }
