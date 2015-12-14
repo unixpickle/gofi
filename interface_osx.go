@@ -103,6 +103,10 @@ func (i *osxInterface) Channel() Channel {
 
 // SetChannel switches to a channel.
 func (iface *osxInterface) SetChannel(c Channel) error {
+	if c.Width == 0 {
+		c.Width = ChannelWidth20MHz
+	}
+
 	resultData := make([]byte, 8+(a80211MaxChannelCount*12))
 	if err := iface.get(a80211CmdSupportedChannels, resultData); err != nil {
 		return err
