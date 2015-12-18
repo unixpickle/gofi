@@ -1,6 +1,8 @@
 // Package gofi provides a super simple API for sending and receiving data-link packets over WiFi.
 package gofi
 
+import "fmt"
+
 type ChannelWidth int
 
 const (
@@ -38,9 +40,22 @@ type Channel struct {
 	Width  ChannelWidth
 }
 
+// A DataRate represents a data rate as a multiple of 500Kb/s.
+type DataRate int
+
+// String returns a human-readable string, measured in Mb/s.
+func (d DataRate) String() string {
+	mbps := float64(d) / 2.0
+	return fmt.Sprintf("%.1f Mb/s", mbps)
+}
+
 // A Handle facilitates raw WiFi interactions like packet injection,
 // sniffing, and channel hopping.
 type Handle interface {
+	// SupportedRates returns a list of supported outgoing data rates
+	// in ascending order.
+	SupportedRates() []DataRate
+
 	// SupportedChannels returns a list of supported WLAN channels.
 	SupportedChannels() []Channel
 
@@ -58,7 +73,8 @@ type Handle interface {
 	Receive() (Frame, *RadioInfo, error)
 
 	// Send sends a packet over the device.
-	Send(Frame) error
+	// If the given DataRate is 0, the lowest supported rate is used.
+	Send(Frame, DataRate) error
 
 	// Close closes the handle.
 	// You should always close a Handle once you are done with it.

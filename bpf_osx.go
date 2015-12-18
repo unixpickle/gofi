@@ -235,11 +235,11 @@ func (b *bpfHandle) ReceiveMany() ([]RadioPacket, error) {
 }
 
 // Send writes a packet to the handle.
-func (b *bpfHandle) Send(frame Frame) error {
+func (b *bpfHandle) Send(frame Frame, r DataRate) error {
 	sendData := frame
 
 	if b.dataLinkType == dltIEEE802_11_RADIO {
-		sendData = encodeRadiotapPacket(frame)
+		sendData = encodeRadiotapPacket(frame, r)
 	}
 
 	// NOTE: although dltIEEE802_11 doesn't give us checksums when receiving,

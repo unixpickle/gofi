@@ -83,6 +83,13 @@ type osxHandle struct {
 	sendLock sync.Mutex
 }
 
+func (h *osxHandle) SupportedRates() []DataRate {
+	// For now, I cannot figure out a good way to find the supported data rates
+	// on OS X. Either way, I could not figure out how to transmit at any rates besides
+	// 1 and 2 Mbps.
+	return []DataRate{2, 4}
+}
+
 func (h *osxHandle) SupportedChannels() []Channel {
 	h.osxInterfaceLock.Lock()
 	defer h.osxInterfaceLock.Unlock()
@@ -131,7 +138,11 @@ func (h *osxHandle) Receive() (Frame, *RadioInfo, error) {
 	return node.packet.Frame, node.packet.RadioInfo, nil
 }
 
-func (h *osxHandle) Send(f Frame) error {
+func (h *osxHandle) Send(f Frame, r DataRate) error {
+	if r == 0 {
+		r = 2
+	}
+
 	h.sendLock.Lock()
 	defer h.sendLock.Unlock()
 
@@ -139,7 +150,7 @@ func (h *osxHandle) Send(f Frame) error {
 	defer h.bpfHandleLock.RUnlock()
 
 	if h.bpfHandle != nil {
-		return h.bpfHandle.Send(f)
+		return h.bpfHandle.Send(f, r)
 	} else {
 		return ErrClosed
 	}

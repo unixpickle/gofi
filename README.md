@@ -39,7 +39,7 @@ Once you're tuned into a channel, you can receive packets using the `Receive` fu
 for {
 	frame, radio, err := handle.Receive()
 	if err != nil {
-        // Could not ready any more data! Maybe the device was unplugged.
+        // Could not read any more data! Maybe the device was unplugged.
 		break
 	}
 	sourceMACAddress := frame[4:10]
@@ -51,8 +51,8 @@ for {
 Sending packets is simple as well, but crafting the packets is up to you!
 
 ```go
-frame := Frame("\x80\x00\x00...")
-if err := handle.Send(frame); err != nil {
+frame := gofi.Frame("\x80\x00\x00...")
+if err := handle.Send(frame, 0); err != nil {
     // Could not send the packet! Did you remember to compute the trailing checksum?
 }
 ```

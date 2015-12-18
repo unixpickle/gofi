@@ -82,7 +82,7 @@ func parseRadiotapPacket(data []byte) (*RadioPacket, error) {
 		case radiotapFlags:
 			flags = int(dataFields[fieldOffset])
 		case radiotapRate:
-			radioInfo.Rate = int(dataFields[fieldOffset])
+			radioInfo.Rate = DataRate(dataFields[fieldOffset])
 		case radiotapChannel:
 			radioInfo.Frequency = int(binary.LittleEndian.Uint16(dataFields[fieldOffset:]))
 		case radiotapNoisePower:
@@ -114,9 +114,9 @@ func parseRadiotapPacket(data []byte) (*RadioPacket, error) {
 }
 
 // encodeRadiotapPacket generates a radiotap buffer which contains a Frame.
-func encodeRadiotapPacket(f Frame) []byte {
-	// Generate a radiotap header with length 9, the FLAGS value, and a flag
-	// indicating that the packet includes a checksum.
-	header := []byte{0, 0, 9, 0, 1 << radiotapFlags, 0, 0, 0, radiotapFlagHasFCS}
+func encodeRadiotapPacket(f Frame, r DataRate) []byte {
+	// Generate a radiotap header with the data rate and the checksum flag.
+	header := []byte{0, 0, 10, 0, (1 << radiotapFlags) | (1 << radiotapRate), 0, 0, 0,
+		radiotapFlagHasFCS, byte(r)}
 	return append(header, f...)
 }

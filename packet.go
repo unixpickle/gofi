@@ -22,7 +22,7 @@ type RadioInfo struct {
 
 	// Rate is the transmit rate, measured in multiples of 500Kb/s.
 	// If this is 0, then the rate is unknown.
-	Rate int
+	Rate DataRate
 }
 
 type RadioPacket struct {
